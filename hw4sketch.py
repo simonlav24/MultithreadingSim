@@ -88,7 +88,7 @@ def SIM_MemInstRead(line, tid):
 		dst.dst_index = int(string[1][1:-1])
 		dst.src1_index = int(string[2][1:-1])
 		if string[3][0] == '$':
-			dst.src2_index_imm = int(string[3][1:-1])
+			dst.src2_index_imm = int(string[3][1:])
 			dst.isSrc2Imm = False
 		else:
 			dst.src2_index_imm = int(string[3], 16)
@@ -98,7 +98,7 @@ def SIM_MemInstRead(line, tid):
 		dst.dst_index = int(string[1][1:-1])
 		dst.src1_index = int(string[2][1:-1])
 		if string[3][0] == '$':
-			dst.src2_index_imm = int(string[3][1:-1])
+			dst.src2_index_imm = int(string[3][1:])
 			dst.isSrc2Imm = False
 		else:
 			dst.src2_index_imm = int(string[3], 16)
@@ -271,6 +271,7 @@ def CORE_BlockedMT():
 	print("---- Blocked MT Simulation ----\n")
 	for i in range(THREAD_NUM):
 		threadsPrograms[i].printRegs()
+	print(totalCycles, totalInst)
 	print("Blocked MT CPI for this program", totalCycles / totalInst)
 
 
@@ -352,6 +353,7 @@ def CORE_FinegrainedMT():
 	print("-----Finegrained MT Simulation -----\n")
 	for i in range(THREAD_NUM):
 		threadsPrograms[i].printRegs()
+	print(totalCycles, totalInst)
 	print("Finegrained Multithreading CPI for this program", totalCycles / totalInst)
 		
 		
@@ -421,8 +423,10 @@ if False:
 	print(hex(dataOffset))
 	print(dataArr)
 
-
-CORE_FinegrainedMT()
+CORE_BlockedMT()
+# for i in range(THREAD_NUM):
+	# threadsPrograms[i].context.regs = [0] * REGS_COUNT
+# CORE_FinegrainedMT()
 
 
 
