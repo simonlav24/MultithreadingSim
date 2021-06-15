@@ -39,7 +39,7 @@ class Thread:
 		
 		self.waitCycle = 0
 	
-	def updateWaitCycles(self, cycles):
+	def updateWaitCycles(self):
 		if self.waitCycle > 0:
 			self.waitCycle -= 1
 			if self.waitCycle == 0:
@@ -119,7 +119,7 @@ def SIM_MemInstRead(line, tid):
 		dst.opcode = CMD_SUB
 		dst.dst_index = int(string[1][1:-1])
 		dst.src1_index = int(string[2][1:-1])
-		dst.src2_index_imm = int(string[3][1:-1])
+		dst.src2_index_imm = int(string[3][1:])
 		dst.isSrc2Imm = False
 	elif string[0] == 'SUBI':
 		dst.opcode = CMD_SUBI
@@ -136,11 +136,11 @@ def SIM_MemInstRead(line, tid):
 
 def loadFromMem(address):
 	index = address - dataOffset
-	return dataArr[index]
+	return dataArr[index//4]
 	
 def storeToMem(address, value):
 	index = address - dataOffset
-	dataArr[index] = value
+	dataArr[index//4] = value
 
 def executeInst(inst, threadId):
 	if inst.opcode == CMD_ADD:
@@ -207,7 +207,7 @@ def CORE_BlockedMT():
 			
 			totalCycles += 1
 			totalInst += 1
-			[i.updateWaitCycles(OVERHEAD) for i in threadsPrograms]
+			[i.updateWaitCycles() for i in threadsPrograms]
 		
 		elif state == S_EVENT:
 			threadsPrograms[currentThreadId].ready = False
@@ -236,7 +236,7 @@ def CORE_BlockedMT():
 		elif state == S_OVERHEAD:
 			print(totalCycles, ":", " ", ":", "overhead")
 			totalCycles += 1
-			[i.updateWaitCycles(OVERHEAD) for i in threadsPrograms]
+			[i.updateWaitCycles() for i in threadsPrograms]
 			overheadingCounter -= 1
 			if overheadingCounter == 0:
 				state = S_COMMAND
@@ -244,7 +244,7 @@ def CORE_BlockedMT():
 		elif state == S_IDLE:
 			print(totalCycles, ":", " ", ":", "idle")
 			totalCycles += 1
-			[i.updateWaitCycles(OVERHEAD) for i in threadsPrograms]
+			[i.updateWaitCycles() for i in threadsPrograms]
 			
 			if threadsPrograms[currentThreadId].ready:
 				state = S_COMMAND
@@ -272,7 +272,94 @@ def CORE_BlockedMT():
 	for i in range(THREAD_NUM):
 		threadsPrograms[i].printRegs()
 	print("Blocked MT CPI for this program", totalCycles / totalInst)
+
+
+
+def CORE_FinegrainedMT():
+	currentThreadId = 0
+	totalCycles = 0
+	totalInst = 0
+	state = S_COMMAND
+	
+	while True:
+		if totalCycles > 30:
+			break
+		
+		# check if any active
+		if not any([i.active for i in threadsPrograms]):
+			break
 			
+		# check if current is ready
+		# if not threadsPrograms[currentThreadId].ready:
+			# state = S_IDLE
+		
+		if state == S_COMMAND:
+			# fetch instruction:
+			currentPc = threadsPrograms[currentThreadId].pc
+			currentInst = SIM_MemInstRead(currentPc, currentThreadId)
+			executeInst(currentInst, currentThreadId)
+			threadsPrograms[currentThreadId].pc += 1
+			print(totalCycles, ":", currentThreadId, ":", instDict[currentInst.opcode])
+			
+			if currentInst.opcode in [CMD_STORE, CMD_LOAD, CMD_HALT]:
+				threadsPrograms[currentThreadId].ready = False
+			# thread wait
+			if currentInst.opcode == CMD_STORE:
+				threadsPrograms[currentThreadId].waitCycle = STORE_LATENCY+1
+			if currentInst.opcode == CMD_LOAD:
+				threadsPrograms[currentThreadId].waitCycle = LOAD_LATENCY+1
+			if currentInst.opcode == CMD_HALT:
+				threadsPrograms[currentThreadId].active = False
+				
+			totalCycles += 1
+			totalInst += 1
+			[i.updateWaitCycles() for i in threadsPrograms]
+			
+			# switch on
+			readyThreads = [i.ready for i in threadsPrograms]
+			if any(readyThreads):
+				for i in range(THREAD_NUM):
+					candidateThread = (currentThreadId + i + 1) % THREAD_NUM
+					if threadsPrograms[candidateThread].ready:
+						currentThreadId = candidateThread
+						# state = S_OVERHEAD
+						# overheadingCounter = OVERHEAD
+						# print("--- context switch on", totalCycles, "to:", currentThreadId, "---")
+						break
+			else:
+				state = S_IDLE
+		
+		elif state == S_IDLE:
+			print(totalCycles, ":", " ", ":", "idle")
+			totalCycles += 1
+			[i.updateWaitCycles() for i in threadsPrograms]
+			
+			if threadsPrograms[currentThreadId].ready:
+				state = S_COMMAND
+				continue
+				# check priority for current thread
+			
+			readyThreads = [i.ready for i in threadsPrograms]
+			if any(readyThreads):
+				for i in range(THREAD_NUM):
+					candidateThread = (currentThreadId + i + 1) % THREAD_NUM
+					if threadsPrograms[candidateThread].ready:
+						state = S_COMMAND
+						currentThreadId = candidateThread
+						break
+			
+	
+	print("-----Finegrained MT Simulation -----\n")
+	for i in range(THREAD_NUM):
+		threadsPrograms[i].printRegs()
+	print("Finegrained Multithreading CPI for this program", totalCycles / totalInst)
+		
+		
+		
+		
+		
+		
+
 ################################################################################## MAIN
 
 
@@ -334,7 +421,8 @@ if False:
 	print(hex(dataOffset))
 	print(dataArr)
 
-CORE_BlockedMT()
+
+CORE_FinegrainedMT()
 
 
 
