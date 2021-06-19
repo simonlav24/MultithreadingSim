@@ -8,24 +8,21 @@
 
 #define DEBUG if(true) std::cout
 
+// class for thread data
 class Thread {
 public:
 	int num;
 	int offset;
-
 	bool ready;
 	bool active;
 	int pc;
-	//tcontext context;
 	int reg[REGS_COUNT];
-
 	int waitCycle;
 
 	Thread(int num, int offset):num(num), offset(offset) {
 		ready = true;
 		active = true;
 		pc = 0;
-		//resetRegs(&context);
 		for (int i = 0; i < REGS_COUNT; i++) {
 			reg[i] = 0;
 		}
@@ -33,17 +30,18 @@ public:
 	}
 	Thread() {}
 
+	// initializer
 	void init() {
 		ready = true;
 		active = true;
 		pc = 0;
-		//resetRegs(&context);
 		for (int i = 0; i < REGS_COUNT; i++) {
 			reg[i] = 0;
 		}
 		waitCycle = 0;
 	}
 
+	// decrement wait cycles in store/load
 	void updateWaitCycles() {
 		if (waitCycle > 0) {
 			waitCycle--;
@@ -52,6 +50,7 @@ public:
 		}
 	}
 
+	// debug printing
 	void printRegs() {
 		for (int i = 0; i < REGS_COUNT; i++) {
 			printf("%d ", reg[i]);
@@ -60,16 +59,18 @@ public:
 	}
 };
 
+// struct for holding stats
 typedef struct {
 	double cpiBlocked;
 	double cpiFineGrained;
-
 }Stats;
 
+// initiate globals
 Stats stats;
 Thread* threadProgramsBlocked;
 Thread* threadProgramsFineGrained;
 
+// checks if any of the threads are active or ready
 bool isAny(Thread* threads, bool active) {
 	for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 		if (active && threads[i].active)
@@ -80,13 +81,14 @@ bool isAny(Thread* threads, bool active) {
 	return false;
 }
 
+// update wait cycles for all threads
 void updateWaitCycles4All(Thread* threadPrograms) {
 	for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 		threadPrograms[i].updateWaitCycles();
 	}
 }
 	
-
+// execute instruction 
 void executeInst(Instruction inst, int threadId, Thread* threadPrograms) {
 	int param1, param2, base, offset, loaded, value;
 	switch (inst.opcode) {
@@ -123,11 +125,12 @@ void executeInst(Instruction inst, int threadId, Thread* threadPrograms) {
 		value = threadPrograms[threadId].reg[inst.src1_index];
 		SIM_MemDataWrite(base + offset, value);
 		break;
+	default:
+		break;
 	}
 }
 
-
-
+// state machine enums
 typedef enum {
 	S_COMMAND = 0,
 	S_IDLE,     
@@ -136,6 +139,7 @@ typedef enum {
 } state;
 
 void CORE_BlockedMT() {
+	// allocate and initialize threads
 	threadProgramsBlocked = new Thread[SIM_GetThreadsNum()];
 	for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 		threadProgramsBlocked[i].init();
@@ -150,6 +154,7 @@ void CORE_BlockedMT() {
 	bool anyReady = false;
 	int candidateThread;
 
+	// main os loop
 	while (true) {
 		// check if any active
 		if (!isAny(threadProgramsBlocked, true))
@@ -161,26 +166,29 @@ void CORE_BlockedMT() {
 
 		switch (currentState) {
 		case S_COMMAND:
-			// fetch instruction :
+			// fetch instruction
 			currentPc = threadProgramsBlocked[currentThreadId].pc;
-			
 			SIM_MemInstRead(currentPc, &currentInst, currentThreadId);
+
+			// execute instruction
 			executeInst(currentInst, currentThreadId, threadProgramsBlocked);
 			threadProgramsBlocked[currentThreadId].pc++;
-			//print(totalCycles, ":", currentThreadId, ":", instDict[currentInst.opcode])
-
+			
+			// if store/load/halt trigger event for context switch
 			if (currentInst.opcode == CMD_STORE || currentInst.opcode == CMD_LOAD || currentInst.opcode == CMD_HALT) {
 				currentState = S_EVENT;
 			}
 
+			// count cycles
 			totalCycles ++;
 			totalInst ++;
 			updateWaitCycles4All(threadProgramsBlocked);
 			break;
 
 		case S_EVENT:
+			// thread wait cycles based on instruction
 			threadProgramsBlocked[currentThreadId].ready = false;
-			// thread wait
+			
 			switch (currentInst.opcode) {
 			case CMD_STORE:
 				threadProgramsBlocked[currentThreadId].waitCycle = SIM_GetStoreLat();
@@ -193,15 +201,13 @@ void CORE_BlockedMT() {
 			case CMD_HALT:
 				threadProgramsBlocked[currentThreadId].active = false;
 				break;
+			default:
+				break;
 			}
+
 			// try to context switch
-			anyReady = false;
-			for (int i = 0; i < SIM_GetThreadsNum(); i++) {
-				if (threadProgramsBlocked[i].ready) {
-					anyReady = true;
-					break;
-				}
-			}
+			anyReady = isAny(threadProgramsBlocked, false);
+
 			if (anyReady) {
 				for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 					candidateThread = (currentThreadId + i + 1) % SIM_GetThreadsNum();
@@ -232,13 +238,7 @@ void CORE_BlockedMT() {
 				continue;
 			}
 
-			anyReady = false;
-			for (int i = 0; i < SIM_GetThreadsNum(); i++) {
-				if (threadProgramsBlocked[i].ready) {
-					anyReady = true;
-					break;
-				}
-			}
+			anyReady = isAny(threadProgramsBlocked, false);
 			if (anyReady) {
 				for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 					candidateThread = (currentThreadId + i + 1) % SIM_GetThreadsNum();
@@ -254,6 +254,8 @@ void CORE_BlockedMT() {
 				}
 			}
 			break;
+		default:
+			break;
 		}
 	}
 
@@ -263,6 +265,7 @@ void CORE_BlockedMT() {
 }
 
 void CORE_FinegrainedMT() {
+	// allocate and initialize threads
 	threadProgramsFineGrained = new Thread[SIM_GetThreadsNum()];
 	for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 		threadProgramsFineGrained[i].init();
@@ -305,6 +308,8 @@ void CORE_FinegrainedMT() {
 			case CMD_HALT:
 				threadProgramsFineGrained[currentThreadId].active = false;
 				break;
+			default:
+				break;
 			}
 			
 			totalCycles++;
@@ -312,13 +317,7 @@ void CORE_FinegrainedMT() {
 			updateWaitCycles4All(threadProgramsFineGrained);
 
 			// switch on
-			anyReady = false;
-			for (int i = 0; i < SIM_GetThreadsNum(); i++) {
-				if (threadProgramsFineGrained[i].ready) {
-					anyReady = true;
-					break;
-				}
-			}
+			anyReady = isAny(threadProgramsFineGrained, false);
 			if (anyReady) {
 				for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 					candidateThread = (currentThreadId + i + 1) % SIM_GetThreadsNum();
@@ -330,7 +329,6 @@ void CORE_FinegrainedMT() {
 			}
 			else
 				currentState = S_IDLE;
-
 			break;
 
 		case S_IDLE:
@@ -342,13 +340,7 @@ void CORE_FinegrainedMT() {
 				currentState = S_COMMAND;
 				continue;
 			}
-			anyReady = false;
-			for (int i = 0; i < SIM_GetThreadsNum(); i++) {
-				if (threadProgramsFineGrained[i].ready) {
-					anyReady = true;
-					break;
-				}
-			}
+			anyReady = isAny(threadProgramsFineGrained, false);
 			if (anyReady) {
 				for (int i = 0; i < SIM_GetThreadsNum(); i++) {
 					candidateThread = (currentThreadId + i + 1) % SIM_GetThreadsNum();
@@ -360,8 +352,11 @@ void CORE_FinegrainedMT() {
 				}
 			}
 			break;
+		default:
+			break;
 		}
 	}
+	// add to record
 	stats.cpiFineGrained = (double)totalCycles / (double)totalInst;
 }
 
